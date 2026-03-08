@@ -1,0 +1,13 @@
+.idea
+
+.kaggle/
+kaggle.json
+
+data/raw/
+data/processed
+.env
+
+__pycache__/
+
+!data/processed/label_map.json
+!data/processed/manifest.json

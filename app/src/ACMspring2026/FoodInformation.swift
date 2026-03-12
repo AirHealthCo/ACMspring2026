@@ -11,30 +11,138 @@ struct FoodInformationView: View {
     @State private var foodData: EssentialNutrients?
     
     var body: some View {
-        VStack {
-                if let food = foodData {
+        ZStack {
+            Color.white
+                .edgesIgnoringSafeArea(.all)
+            
+            VStack(spacing: 24) {
+                // Header with food name and status dot
+                HStack(spacing: 12) {
                     Text(name)
-                    Text("Calories: \(food.calories)")
-                    Text("Protein: \(food.protein)")
-                    Text("Carbs: \(food.carbs)")
-                    Text("Protein: \(food.protein)")
-                } else {
-                    Text("Loading...")
+                        .font(.system(size: 40, weight: .bold))
+                        .foregroundColor(.black)
+                    
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 16, height: 16)
+                    
+                    Spacer()
                 }
-            }.task {
-                if name != "" {
-                    foodData = try? await WebAPI.getFoodData(name)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                
+                
+                VStack(spacing: 16) {
+                    HStack(spacing: 16) {
+                        NutritionBox(
+                            label: "CARBS",
+                            value: foodData?.carbs ?? "N/A",
+                            unit: "g",
+                            color: Color(red: 0.1, green: 0.1, blue: 0.8)
+                        )
+                        
+                        NutritionBox(
+                            label: "SUGARS",
+                            value: foodData?.sugars ?? "N/A",
+                            unit: "g",
+                            color: Color(red: 0.9, green: 0.4, blue: 0.6)
+                        )
+                    }
+                    
+                    HStack(spacing: 16) {
+                        NutritionBox(
+                            label: "CALORIES",
+                            value: foodData?.calories ?? "N/A",
+                            unit: "",
+                            color: Color.green
+                        )
+                        
+                        NutritionBox(
+                            label: "TRANS FAT",
+                            value: foodData?.transFat ?? "N/A",
+                            unit: "g",
+                            color: Color(red: 0.6, green: 0.3, blue: 0.9)
+                        )
+                    }
+                    
+                    HStack(spacing: 16) {
+                        NutritionBox(
+                            label: "PROTEIN",
+                            value: foodData?.protein ?? "N/A",
+                            unit: "g",
+                            color: Color(red: 0.9, green: 0.6, blue: 0.3)
+                        )
+                        
+                        NutritionBox(
+                            label: "SAT FAT",
+                            value: foodData?.satFat ?? "N/A",
+                            unit: "g",
+                            color: Color(red: 0.95, green: 0.4, blue: 0.4)
+                        )
+                    }
                 }
-
-                }
+                .padding(.horizontal, 20)
+                
+                Spacer()
+                
+                RoundedRectangle(cornerRadius: 25)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    .frame(height: 50)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+            }
+            
+        }.task(id: name) {
+            guard !name.isEmpty else { return }
+            let cleanedName = name.replacingOccurrences(of: "_", with: " ")
+            foodData = try? await WebAPI.getFoodData(cleanedName)
         }
-
+        
     
+    }
+
+
+    struct NutritionBox: View {
+        let label: String
+        let value: String
+        let unit: String
+        let color: Color
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                Text(label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color.gray)
+                    .tracking(0.5)
+                Spacer()
+                
+                HStack(spacing: 2) {
+                
+                    Text(value)
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundColor(color)
+                    
+                    if !unit.isEmpty {
+                        Text(unit)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(color)
+                    }
+                }
+                
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, minHeight: 160)
+            .padding(20)
+            .background(Color(UIColor(red: 0.97, green: 0.97, blue: 0.97, alpha: 1.0)))
+            .cornerRadius(16)
+        }
+    }
     
 }
 
+
 #Preview {
-    FoodInformationView(name: "")
+    FoodInformationView(name: "apple")
 }
 
 

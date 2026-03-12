@@ -12,7 +12,7 @@ struct EssentialNutrients {
     var carbs: String = "0"
     var sugars: String = "0"
     var calories: String = "0"
-    var unsatFat: String = "0"
+    var transFat: String = "0"
     var protein: String = "0"
     var satFat: String = "0"
 }

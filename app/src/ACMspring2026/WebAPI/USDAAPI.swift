@@ -7,7 +7,19 @@
 import Foundation
 
 class USDAFoodData: FoodData {
-    let APIKEY = "DEMO_KEY"
+    
+    var APIKEY = ""
+    // Make a private api key in a file called Secrets.plist
+    init() {
+            if let path = Bundle.main.path(forResource: "Secrets", ofType: "plist"),
+               let dict = NSDictionary(contentsOfFile: path) as? [String: Any],
+               let key = dict["USDA_API_KEY"] as? String {
+            self.APIKEY = key
+            print(APIKEY)
+            } else {
+                print("Secrets.plist not found or API key missing")
+            }
+        }
 
     struct FoodResponse: Codable {
         let foods: [Food]
@@ -29,25 +41,35 @@ class USDAFoodData: FoodData {
         let url = URL(string: endpoint)!
         let urlRequest = URLRequest(url: url)
         let (data, _) = try await URLSession.shared.data(for: urlRequest)
+       
         let decoded = try JSONDecoder().decode(FoodResponse.self, from: data)
-        for nutrient in decoded.foods[0].foodNutrients {
+
+        if !decoded.foods.isEmpty {
+            for nutrient in decoded.foods[0].foodNutrients {
                 switch nutrient.nutrientName {
-                case "Carbohydrates":
-                    EssentialNutrients.shared.carbs = String(format: "%.1f", nutrient.value)
-                case "Sugars":
-                    EssentialNutrients.shared.sugars = String(format: "%.1f", nutrient.value)
-                case "Calories":
-                    EssentialNutrients.shared.calories = String(format: "%.1f", nutrient.value)
-                case "Unsaturated Fat":
-                    EssentialNutrients.shared.unsatFat = String(format: "%.1f", nutrient.value)
-                case "Protein":
-                    EssentialNutrients.shared.protein = String(format: "%.1f", nutrient.value)
-                case "Saturated Fat":
-                    EssentialNutrients.shared.satFat = String(format: "%.1f", nutrient.value)
-                default:
-                    break
-                }
+                    case "Carbohydrate, by difference":
+                        EssentialNutrients.shared.carbs = String(format: "%.1f", nutrient.value)
+
+                    case "Sugars, total including NLEA":
+                        EssentialNutrients.shared.sugars = String(format: "%.1f", nutrient.value)
+
+                    case "Energy":
+                        EssentialNutrients.shared.calories = String(format: "%.1f", nutrient.value)
+
+                    case "Protein":
+                        EssentialNutrients.shared.protein = String(format: "%.1f", nutrient.value)
+
+                    case "Fatty acids, total saturated":
+                        EssentialNutrients.shared.satFat = String(format: "%.1f", nutrient.value)
+                    
+                    case "Fatty acids, total trans":
+                            EssentialNutrients.shared.transFat = String(format: "%.1f", nutrient.value)
+                    default:
+                        break
+                    }
+            }
         }
+        
         return EssentialNutrients.shared
     }
 }

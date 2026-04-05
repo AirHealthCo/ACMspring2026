@@ -17,8 +17,7 @@ struct ContentView: View {
     @State private var showFoodInfo = false
     @State private var isLoading = false
     @State private var identificationSource = ""
-
-    private let confidenceThreshold: Float = 0.75
+    @State private var debugLines: [String] = []
     
     
     func pixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
@@ -87,19 +86,27 @@ struct ContentView: View {
                 // Top-3
                 let indexed = probs.enumerated().sorted { $0.element > $1.element }
                 let topK = Array(indexed.prefix(3))
-                let topLabel = FoodLabels.all[topK[0].offset]
-                let topConfidence = topK[0].element
-
-                if topConfidence >= confidenceThreshold {
-                    prediction = topLabel
-                    identificationSource = "classifier"
-                } else {
-                    let candidates = topK.map { (label: FoodLabels.all[$0.offset],
-                                                 confidence: $0.element) }
-                    prediction = try await ClaudeClient.shared.identify(image: uiImage,
-                                                                        candidates: candidates)
-                    identificationSource = "claude"
+                // Debug: log ML results
+                var debug: [String] = []
+                debug.append("=== ML Classifier (top 3) ===")
+                for (rank, item) in topK.enumerated() {
+                    let label = FoodLabels.all[item.offset]
+                    let pct = Int(item.element * 100)
+                    let line = "\(rank + 1). \(label) — \(pct)%"
+                    debug.append(line)
+                    print("[ML] \(line)")
                 }
+
+                let candidates = topK.map { (label: FoodLabels.all[$0.offset],
+                                             confidence: $0.element) }
+                debug.append("→ Asking Claude to verify...")
+                print("[ML] → Asking Claude to verify...")
+                debugLines = debug
+                let (claudeLabel, claudeDebug) = try await ClaudeClient.shared.identify(
+                    image: uiImage, candidates: candidates)
+                debugLines.append(contentsOf: claudeDebug)
+                prediction = claudeLabel
+                identificationSource = "claude"
 
             } catch {
                 prediction = "Prediction failed: \(error.localizedDescription)"
@@ -128,12 +135,19 @@ struct ContentView: View {
                     }
                     .onChange(of: selectedImage) { newImage in
                         if let newImage = newImage {
+                            debugLines = []
                             classifyImage(newImage)
                         }
                     }
-                
 
-                    
+                    if let img = selectedImage {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 220)
+                            .cornerRadius(10)
+                    }
+
                     if isLoading {
                         ProgressView("Identifying...")
                             .padding()
@@ -162,6 +176,23 @@ struct ContentView: View {
                             destination: FoodInformationView(name: prediction),
                             isActive: $showFoodInfo
                         ) { EmptyView() }
+                    }
+
+                    if !debugLines.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Debug")
+                                .font(.caption.bold())
+                                .foregroundColor(.secondary)
+                            ForEach(debugLines, id: \.self) { line in
+                                Text(line)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
                     }
 
                     Spacer()

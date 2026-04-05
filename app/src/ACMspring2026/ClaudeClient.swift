@@ -17,7 +17,7 @@ actor ClaudeClient {
     }()
 
     func identify(image: UIImage,
-                  candidates: [(label: String, confidence: Float)]) async throws -> String {
+                  candidates: [(label: String, confidence: Float)]) async throws -> (String, [String]) {
 
         guard let imageData = image.jpegData(compressionQuality: 0.85) else {
             throw ClaudeError.imageEncodingFailed
@@ -30,20 +30,21 @@ actor ClaudeClient {
         }.joined(separator: "\n")
 
         let prompt = """
-        A food classifier's top candidates for this image are:
+        A food classifier's top guesses for this image are:
         \(candidateLines)
 
-        Look at the image. Identify the food shown.
-        - If one of the candidates matches, respond with exactly that candidate's label \
-        (underscores, no spaces), e.g.: apple_pie
-        - If none match, respond with the closest Food-101 label from the classifier \
-        list that best fits what you see.
-        - Respond with the label only. No other text.
+        Look at the image and identify what food is actually shown.
+        - If the top guess looks correct, respond with that label (underscores, no spaces).
+        - If the top guess seems wrong, ignore it and respond with the correct food name \
+        (e.g.: apple, grilled_salmon, birthday_cake). You are not limited to the classifier's list.
+        - Respond with the food label only. No other text.
         """
+
+        print("[Claude] Prompt sent:\n\(prompt)")
 
         let body: [String: Any] = [
             "model": "claude-sonnet-4-6",
-            "max_tokens": 32,
+            "max_tokens": 64,
             "messages": [[
                 "role": "user",
                 "content": [
@@ -70,14 +71,26 @@ actor ClaudeClient {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let rawBody = String(data: data, encoding: .utf8) ?? "<unreadable>"
+            print("[Claude] Error response: \(rawBody)")
             throw ClaudeError.badResponse
         }
 
         let decoded = try JSONDecoder().decode(ClaudeResponse.self, from: data)
-        let label = decoded.content.first?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let finalLabel = decoded.content.first?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? candidates[0].label
+        print("[Claude] Raw response: \"\(finalLabel)\"")
 
-        // Validate that Claude returned a known label; fall back to top candidate if not
-        return FoodLabels.all.contains(label) ? label : candidates[0].label
+        var debugLines: [String] = []
+        debugLines.append("=== Claude ===")
+        debugLines.append("Prompt candidates:")
+        for line in candidateLines.split(separator: "\n") { debugLines.append("  \(line)") }
+        debugLines.append("→ Claude answer: \"\(finalLabel)\"")
+        let topMLLabel = candidates[0].label
+        if finalLabel != topMLLabel {
+            debugLines.append("⚠ Overrode ML guess (\(topMLLabel))")
+        }
+
+        return (finalLabel, debugLines)
     }
 }
 

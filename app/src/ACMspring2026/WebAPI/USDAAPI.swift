@@ -18,7 +18,7 @@ class USDAFoodData: FoodData {
         let foodNutrients: [Nutrient]
     }
 
-    struct Nutrient: Codable {
+    struct Nutrient: Codable {  
         let nutrientName: String
         let value: Double
     }

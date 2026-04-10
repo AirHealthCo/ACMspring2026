@@ -17,9 +17,10 @@ actor ClaudeClient {
     }()
 
     func identify(image: UIImage,
-                  candidates: [(label: String, confidence: Float)]) async throws -> (String, [String]) {
+                  candidates: [(label: String, confidence: Float)]) async throws -> (label: String, usdaQuery: String, dataType: String, debugLines: [String]) {
 
-        guard let imageData = image.jpegData(compressionQuality: 0.85) else {
+        let resized = image.resizedToMaxDimension(1024)
+        guard let imageData = resized.jpegData(compressionQuality: 0.8) else {
             throw ClaudeError.imageEncodingFailed
         }
         let base64Image = imageData.base64EncodedString()
@@ -33,18 +34,19 @@ actor ClaudeClient {
         A food classifier's top guesses for this image are:
         \(candidateLines)
 
-        Look at the image and identify what food is actually shown.
-        - If the top guess looks correct, respond with that label (underscores, no spaces).
-        - If the top guess seems wrong, ignore it and respond with the correct food name \
-        (e.g.: apple, grilled_salmon, birthday_cake). You are not limited to the classifier's list.
-        - Respond with the food label only. No other text.
+        Look at the image and identify what food is shown. Respond with ONLY valid JSON, no markdown:
+        {
+          "label": "<short food name, underscores for spaces, e.g. grilled_salmon>",
+          "usdaQuery": "<a concise description of the food as it would appear in a USDA database, e.g. 'salmon grilled' or 'apple raw'>",
+          "dataType": "<'Foundation' for whole/raw/minimally-processed foods, 'SR Legacy' for prepared or packaged foods>"
+        }
         """
 
         print("[Claude] Prompt sent:\n\(prompt)")
 
         let body: [String: Any] = [
             "model": "claude-sonnet-4-6",
-            "max_tokens": 64,
+            "max_tokens": 128,
             "messages": [[
                 "role": "user",
                 "content": [
@@ -77,20 +79,36 @@ actor ClaudeClient {
         }
 
         let decoded = try JSONDecoder().decode(ClaudeResponse.self, from: data)
-        let finalLabel = decoded.content.first?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? candidates[0].label
-        print("[Claude] Raw response: \"\(finalLabel)\"")
+        let raw = decoded.content.first?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        print("[Claude] Raw response: \(raw)")
 
+        struct ClaudeFood: Decodable {
+            let label: String
+            let usdaQuery: String
+            let dataType: String
+        }
+        let parsed: ClaudeFood
+        if let jsonData = raw.data(using: .utf8),
+           let p = try? JSONDecoder().decode(ClaudeFood.self, from: jsonData) {
+            parsed = p
+        } else {
+            // Fallback: treat raw text as label
+            parsed = ClaudeFood(label: raw, usdaQuery: raw, dataType: "Foundation")
+        }
+
+        let topMLLabel = candidates[0].label
         var debugLines: [String] = []
         debugLines.append("=== Claude ===")
         debugLines.append("Prompt candidates:")
         for line in candidateLines.split(separator: "\n") { debugLines.append("  \(line)") }
-        debugLines.append("→ Claude answer: \"\(finalLabel)\"")
-        let topMLLabel = candidates[0].label
-        if finalLabel != topMLLabel {
+        debugLines.append("→ label: \"\(parsed.label)\"")
+        debugLines.append("→ usdaQuery: \"\(parsed.usdaQuery)\"")
+        debugLines.append("→ dataType: \"\(parsed.dataType)\"")
+        if parsed.label != topMLLabel {
             debugLines.append("⚠ Overrode ML guess (\(topMLLabel))")
         }
 
-        return (finalLabel, debugLines)
+        return (parsed.label, parsed.usdaQuery, parsed.dataType, debugLines)
     }
 }
 
@@ -99,6 +117,19 @@ actor ClaudeClient {
 private struct ClaudeResponse: Codable {
     struct Content: Codable { let text: String }
     let content: [Content]
+}
+
+// MARK: - UIImage resize helper
+
+private extension UIImage {
+    func resizedToMaxDimension(_ maxDim: CGFloat) -> UIImage {
+        let longest = max(size.width, size.height)
+        guard longest > maxDim else { return self }
+        let scale = maxDim / longest
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in draw(in: CGRect(origin: .zero, size: newSize)) }
+    }
 }
 
 // MARK: - Errors

@@ -10,11 +10,16 @@ import AVFoundation
 import CoreML
 
 struct ContentView: View {
-    
+
+    @EnvironmentObject var waterStore: WaterStore
+
     @State private var showCamera = false
     @State private var selectedImage: UIImage?
     @State private var prediction: String = ""
+    @State private var usdaQuery: String = ""
+    @State private var usdaDataType: String = "Foundation"
     @State private var showFoodInfo = false
+    @State private var showWaterLog = false
     @State private var isLoading = false
     @State private var identificationSource = ""
     @State private var debugLines: [String] = []
@@ -102,10 +107,12 @@ struct ContentView: View {
                 debug.append("→ Asking Claude to verify...")
                 print("[ML] → Asking Claude to verify...")
                 debugLines = debug
-                let (claudeLabel, claudeDebug) = try await ClaudeClient.shared.identify(
+                let (claudeLabel, claudeQuery, claudeDataType, claudeDebug) = try await ClaudeClient.shared.identify(
                     image: uiImage, candidates: candidates)
                 debugLines.append(contentsOf: claudeDebug)
                 prediction = claudeLabel
+                usdaQuery = claudeQuery
+                usdaDataType = claudeDataType
                 identificationSource = "claude"
 
             } catch {
@@ -173,7 +180,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
 
                         NavigationLink(
-                            destination: FoodInformationView(name: prediction),
+                            destination: FoodInformationView(name: prediction, usdaQuery: usdaQuery, dataType: usdaDataType),
                             isActive: $showFoodInfo
                         ) { EmptyView() }
                     }
@@ -198,14 +205,36 @@ struct ContentView: View {
                     Spacer()
                 }
                 .padding()
+
+                // Water bottle — bottom-left
+                VStack {
+                    Spacer()
+                    HStack {
+                        Button {
+                            showWaterLog = true
+                        } label: {
+                            WaterBottleButton(fillFraction: waterStore.log.fillFraction)
+                        }
+                        .padding([.leading, .bottom], 20)
+                        Spacer()
+                    }
+                }
+            }
+            .sheet(isPresented: $showWaterLog) {
+                NavigationStack {
+                    WaterLogView()
+                }
+                .environmentObject(waterStore)
             }
 
-
             .background(Color.white.edgesIgnoringSafeArea(.all))
+            .toolbarBackground(Color.white, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(WaterStore())
 }

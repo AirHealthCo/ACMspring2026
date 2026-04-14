@@ -8,78 +8,78 @@ import SwiftUI
 
 struct FoodInformationView: View {
     let name: String
-    @State private var foodData: EssentialNutrients?
-    
-    var body: some View {
-        ZStack {
-            Color.white
-                .edgesIgnoringSafeArea(.all)
-            
-            VStack(spacing: 24) {
+    let usdaQuery: String
+    let dataType: String
+    @State private var foodData: NutritionInfo?
 
-                HStack(spacing: 12) {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+
+                // Title
+                HStack(spacing: 8) {
                     Text(name.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundColor(.black)
-                    
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 16, height: 16)
-                    
-                    Spacer()
+                        .font(.largeTitle.bold())
+                   
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 20)
-                
-                
-                VStack(spacing: 16) {
-                    HStack(spacing: 16) {
-                        NutritionBox(
-                            label: "CARBS",
-                            value: foodData?.carbs ?? "N/A",
-                            unit: "g",
-                            color: Color(red: 0.1, green: 0.1, blue: 0.8)
-                        )
-                        
-                        NutritionBox(
-                            label: "SUGARS",
-                            value: "21.0",
-                            unit: "g",
-                            color: Color(red: 0.9, green: 0.4, blue: 0.6)
-                        )
+                .padding(.top, 8)
+
+                if let food = foodData {
+                    // serving size
+                    if let serving = food.servingSizeG {
+                        Text("Per \(Int(serving))g serving")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 20)
                     }
-                    
-                    HStack(spacing: 16) {
-                        NutritionBox(
-                            label: "CALORIES",
-                            value: foodData?.calories ?? "N/A",
-                            unit: "",
-                            color: Color.green
-                        )
-                        
-                        NutritionBox(
-                            label: "TRANS FAT",
-                            value: foodData?.transFat ?? "N/A",
-                            unit: "g",
-                            color: Color(red: 0.6, green: 0.3, blue: 0.9)
-                        )
+
+                    // nutrition grid
+                    let nutrients: [(label: String, value: String, icon: String, color: Color)] = [
+                        ("Calories",   formatted(food.caloriesKcal),         "flame.fill",        .orange),
+                        ("Carbs",      formatted(food.totalCarbsG) + "g",    "chart.bar.fill",    .blue),
+                        ("Protein",    formatted(food.proteinG) + "g",       "bolt.fill",         Color(red: 0.4, green: 0.7, blue: 0.3)),
+                        ("Total Fat",  formatted(food.totalFatG) + "g",      "drop.fill",         .purple),
+                        ("Sugars",     formatted(food.totalSugarsG) + "g",   "cube.fill",         .pink),
+                        ("Sat. Fat",   formatted(food.saturatedFatG) + "g",  "exclamationmark.circle.fill", Color(red: 1, green: 0.45, blue: 0.45)),
+                    ]
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        ForEach(nutrients, id: \.label) { n in
+                            NutrientCard(label: n.label, value: n.value, icon: n.icon, color: n.color)
+                        }
                     }
-                    
-                    HStack(spacing: 16) {
-                        NutritionBox(
-                            label: "PROTEIN",
-                            value: foodData?.protein ?? "N/A",
-                            unit: "g",
-                            color: Color(red: 0.9, green: 0.6, blue: 0.3)
-                        )
-                        
-                        NutritionBox(
-                            label: "SAT FAT",
-                            value: foodData?.satFat ?? "N/A",
-                            unit: "g",
-                            color: Color(red: 0.95, green: 0.4, blue: 0.4)
-                        )
+                    .padding(.horizontal, 16)
+
+                    // Extra nutrients card
+                    VStack(spacing: 0) {
+                        NutrientRow(label: "Dietary Fiber", value: formatted(food.dietaryFiberG) + "g")
+                        Divider().padding(.leading, 16)
+                        NutrientRow(label: "Sodium", value: formatted(food.sodiumMg) + "mg")
+                        Divider().padding(.leading, 16)
+                        NutrientRow(label: "Cholesterol", value: formatted(food.cholesterolMg) + "mg")
+                        Divider().padding(.leading, 16)
+                        NutrientRow(label: "Potassium", value: formatted(food.potassiumMg) + "mg")
+                        Divider().padding(.leading, 16)
+                        NutrientRow(label: "Calcium", value: formatted(food.calciumMg) + "mg")
+                        Divider().padding(.leading, 16)
+                        NutrientRow(label: "Iron", value: formatted(food.ironMg) + "mg")
                     }
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
+                    .padding(.horizontal, 16)
+
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.orange)
+                        Text("Loading nutrition info...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
                 }
                 .padding(.horizontal, 20)
                 
@@ -102,47 +102,75 @@ struct FoodInformationView: View {
     }
 
 
-    struct NutritionBox: View {
-        let label: String
-        let value: String
-        let unit: String
-        let color: Color
-        
-        var body: some View {
-            VStack(spacing: 8) {
-                Text(label)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color.gray)
-                    .tracking(0.5)
-                Spacer()
-                
-                HStack(spacing: 2) {
-                
-                    Text(value)
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundColor(color)
-                    
-                    if !unit.isEmpty {
-                        Text(unit)
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(color)
-                    }
-                }
-                
-                Spacer()
+                Spacer(minLength: 30)
             }
-            .frame(maxWidth: .infinity, minHeight: 160)
-            .padding(20)
-            .background(Color(UIColor(red: 0.97, green: 0.97, blue: 0.97, alpha: 1.0)))
-            .cornerRadius(16)
+        }
+        .background(Color(.systemGray6).edgesIgnoringSafeArea(.all))
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if !usdaQuery.isEmpty {
+                foodData = try? await NutritionAPI.shared.getNutrition(for: usdaQuery, dataType: dataType)
+            }
         }
     }
-    
+
+    func formatted(_ val: Double?) -> String {
+        guard let v = val else { return "—" }
+        return v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v)
+    }
 }
 
+struct NutrientCard: View {
+    let label: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(color)
+                    .font(.system(size: 14))
+                Text(label)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .tracking(0.3)
+            }
+            Text(value)
+                .font(.system(size: 36, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+                .minimumScaleFactor(0.5)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 2)
+    }
+}
+
+struct NutrientRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+}
 
 #Preview {
-    FoodInformationView(name: "apple pie")
+    NavigationView {
+        FoodInformationView(name: "Banana", usdaQuery: "banana raw", dataType: "Foundation")
+    }
 }
-
-

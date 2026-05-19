@@ -11,36 +11,19 @@ import CoreML
 
 struct ContentView: View {
     
+    @EnvironmentObject var waterStore: WaterStore
+    
     @State private var showCamera = false
     @State private var selectedImage: UIImage?
     @State private var prediction: String = ""
-    @State private var rawPrediction: String = ""
+    @State private var usdaQuery: String = ""
+    @State private var usdaDataType: String = "Foundation"
     @State private var showFoodInfo = false
-    @State private var triggerCapture = false
-    
-    
-    
-    let labels = [
-            "apple_pie","baby_back_ribs","baklava","beef_carpaccio","beef_tartare",
-            "beet_salad","beignets","bibimbap","bread_pudding","breakfast_burrito",
-            "bruschetta","caesar_salad","cannoli","caprese_salad","carrot_cake",
-            "ceviche","cheese_plate","cheesecake","chicken_curry","chicken_quesadilla",
-            "chicken_wings","chocolate_cake","chocolate_mousse","churros","clam_chowder",
-            "club_sandwich","crab_cakes","creme_brulee","croque_madame","cup_cakes",
-            "deviled_eggs","donuts","dumplings","edamame","eggs_benedict",
-            "escargots","falafel","filet_mignon","fish_and_chips","foie_gras",
-            "french_fries","french_onion_soup","french_toast","fried_calamari","fried_rice",
-            "frozen_yogurt","garlic_bread","gnocchi","greek_salad","grilled_cheese_sandwich",
-            "grilled_salmon","guacamole","gyoza","hamburger","hot_and_sour_soup",
-            "hot_dog","huevos_rancheros","hummus","ice_cream","lasagna","lobster_bisque",
-            "lobster_roll_sandwich","macaroni_and_cheese","macarons","miso_soup","mussels",
-            "nachos","omelette","onion_rings","oysters","pad_thai","paella","pancakes",
-            "panna_cotta","peking_duck","pho","pizza","pork_chop","poutine","prime_rib",
-            "pulled_pork_sandwich","ramen","ravioli","red_velvet_cake","risotto","samosa",
-            "sashimi","scallops","seaweed_salad","shrimp_and_grits","spaghetti_bolognese",
-            "spaghetti_carbonara","spring_rolls","steak","strawberry_shortcake","sushi",
-            "tacos","takoyaki","tiramisu","tuna_tartare","waffles"
-        ]
+    @State private var showWaterLog = false
+    @State private var isLoading = false
+    @State private var identificationSource = ""
+    @State private var debugLines: [String] = []
+
     
     
     func pixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
@@ -83,100 +66,249 @@ struct ContentView: View {
     }
     
     func classifyImage(_ uiImage: UIImage) {
-        do {
-            let model = try FoodClassifier()
+        Task {
+            isLoading = true
+            defer { isLoading = false }
             
-            guard let buffer = pixelBuffer(from: uiImage, size: CGSize(width: 384, height: 384)) else {
-                prediction = "Failed to process image"
-                return
-            }
-            
-            let output = try model.prediction(x_1: buffer)
-            let multiArray = output.var_2422
-            print(multiArray)
-            let pointer = multiArray.dataPointer.bindMemory(to: Float32.self, capacity: multiArray.count)
-            let values = Array(UnsafeBufferPointer(start: pointer, count: multiArray.count))
-            
-            if let maxIndex = values.firstIndex(of: values.max() ?? 0) {
-                let raw = labels[maxIndex]
+            do {
+                let model = try FoodClassifier()
                 
-                rawPrediction = raw
-                prediction = raw.replacingOccurrences(of: "_", with: " ").capitalized
+                guard let buffer = pixelBuffer(from: uiImage, size: CGSize(width: 384, height: 384)) else {
+                    prediction = "Failed to process image"
+                    return
+                }
+                
+                let output = try model.prediction(x_1: buffer)
+                let multiArray = output.var_2422
+                let pointer = multiArray.dataPointer.bindMemory(to: Float32.self, capacity: multiArray.count)
+                let logits = Array(UnsafeBufferPointer(start: pointer, count: multiArray.count))
+                
+                // Softmax
+                let maxLogit = logits.max() ?? 0
+                let exps = logits.map { exp($0 - maxLogit) }
+                let expSum = exps.reduce(0, +)
+                let probs = exps.map { $0 / expSum }
+                
+                // Top-3
+                let indexed = probs.enumerated().sorted { $0.element > $1.element }
+                let topK = Array(indexed.prefix(3))
+                // Debug: log ML results
+                var debug: [String] = []
+                debug.append("=== ML Classifier (top 3) ===")
+                for (rank, item) in topK.enumerated() {
+                    let label = FoodLabels.all[item.offset]
+                    let pct = Int(item.element * 100)
+                    let line = "\(rank + 1). \(label) — \(pct)%"
+                    debug.append(line)
+                    print("[ML] \(line)")
+                }
+                
+                let candidates = topK.map { (label: FoodLabels.all[$0.offset],
+                                             confidence: $0.element) }
+                debug.append("→ Asking Claude to verify...")
+                print("[ML] → Asking Claude to verify...")
+                debugLines = debug
+                let (claudeLabel, claudeQuery, claudeDataType, claudeDebug) = try await ClaudeClient.shared.identify(
+                    image: uiImage, candidates: candidates)
+                debugLines.append(contentsOf: claudeDebug)
+                prediction = claudeLabel
+                usdaQuery = claudeQuery
+                usdaDataType = claudeDataType
+                identificationSource = "claude"
+                
+            } catch {
+                prediction = "Prediction failed: \(error.localizedDescription)"
+                print("Error:", error)
             }
-            
-        } catch {
-            prediction = "Prediction failed"
-            print("CoreML Error:", error)
         }
     }
     
-            
+    
     
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Camera Feed
-                    CameraView(image: $selectedImage, triggerCapture: $triggerCapture)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: UIScreen.main.bounds.height * 0.65)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .onChange(of: selectedImage) { newImage in
-                            if let image = newImage {
-                                classifyImage(image)
-                            }
-                        }
-                    
-                    Spacer()
-                    
-                    
-                    Button(action: {
-                        triggerCapture = true
-                    }) {
-                        ZStack {
-                            
-                            Circle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(width: 60, height: 60)
-                            
-                          
-                            Circle()
-                                .fill(Color.white.opacity(0.7))
-                                .frame(width: 48, height: 48)
-                        }
-                    }
-                    .padding(.bottom, 20)
-                    
-                    
-                    if !prediction.isEmpty {
-                        NavigationLink(
-                            destination: FoodInformationView(name: rawPrediction)
-                        ) {
-                            Text(prediction)
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 50)
-                                .background(Color.orange.opacity(0.7))
-                                .cornerRadius(25)
-                        }
-                        .padding(.horizontal, 30)
-                        .padding(.bottom, 30)
-                    }
-                    
-                    Spacer()
-                }
-            }
-            .navigationBarHidden(true)
-        }
-    }
-}
+           NavigationView {
+               ZStack(alignment: .bottom) {
+                   Color(.systemGray6).edgesIgnoringSafeArea(.all)
 
+                   ScrollView {
+                       VStack(alignment: .leading, spacing: 24) {
+
+                           // Header
+                           HStack {
+                               VStack(alignment: .leading, spacing: 4) {
+                                   Text("Nutrition Scanner")
+                                       .font(.largeTitle.bold())
+                                   Text("Scan your food to get nutrition info")
+                                       .font(.subheadline)
+                                       .foregroundColor(.secondary)
+                               }
+                               Spacer()
+                               Circle()
+                                   .fill(Color(.systemGray4))
+                                   .frame(width: 40, height: 40)
+                                   .overlay(
+                                       Image(systemName: "person.fill")
+                                           .foregroundColor(.gray)
+                                   )
+                           }
+                           .padding(.horizontal, 20)
+                           .padding(.top, 16)
+
+                           // Camera / Image card
+                           Button {
+                               showCamera = true
+                           } label: {
+                               ZStack {
+                                   RoundedRectangle(cornerRadius: 20)
+                                       .fill(Color.white)
+                                       .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
+
+                                   if let img = selectedImage {
+                                       Image(uiImage: img)
+                                           .resizable()
+                                           .scaledToFill()
+                                           .frame(maxWidth: .infinity)
+                                           .frame(height: 260)
+                                           .clipShape(RoundedRectangle(cornerRadius: 20))
+                                   } else {
+                                       VStack(spacing: 12) {
+                                           ZStack {
+                                               Circle()
+                                                   .fill(Color.orange.opacity(0.12))
+                                                   .frame(width: 70, height: 70)
+                                               Image(systemName: "camera.fill")
+                                                   .font(.system(size: 28))
+                                                   .foregroundColor(.orange)
+                                           }
+                                           Text("Tap to scan food")
+                                               .font(.headline)
+                                               .foregroundColor(.primary)
+                                           Text("Point your camera at any food item")
+                                               .font(.subheadline)
+                                               .foregroundColor(.secondary)
+                                       }
+                                       .frame(height: 260)
+                                   }
+                               }
+                           }
+                           .padding(.horizontal, 20)
+                           .sheet(isPresented: $showCamera) {
+                               CameraView(image: $selectedImage)
+                           }
+                           .onChange(of: selectedImage) { newImage in
+                               if let newImage = newImage {
+                                   debugLines = []
+                                   classifyImage(newImage)
+                               }
+                           }
+
+                           // Result card
+                           if isLoading {
+                               HStack(spacing: 14) {
+                                   ProgressView().tint(.orange)
+                                   VStack(alignment: .leading, spacing: 2) {
+                                       Text("Identifying food...")
+                                           .font(.headline)
+                                       Text("Powered by Claude AI")
+                                           .font(.caption)
+                                           .foregroundColor(.secondary)
+                                   }
+                                   Spacer()
+                               }
+                               .padding(20)
+                               .background(Color.white)
+                               .cornerRadius(16)
+                               .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
+                               .padding(.horizontal, 20)
+
+                           } else if !prediction.isEmpty {
+                               VStack(spacing: 0) {
+                                   // Food result row
+                                   Button {
+                                       showFoodInfo = true
+                                   } label: {
+                                       HStack(spacing: 14) {
+                                           ZStack {
+                                               Circle()
+                                                   .fill(Color.orange.opacity(0.12))
+                                                   .frame(width: 48, height: 48)
+                                               Image(systemName: "fork.knife")
+                                                   .foregroundColor(.orange)
+                                                   .font(.system(size: 18))
+                                           }
+                                           VStack(alignment: .leading, spacing: 3) {
+                                               Text(prediction.replacingOccurrences(of: "_", with: " ").capitalized)
+                                                   .font(.headline)
+                                                   .foregroundColor(.primary)
+                                               Text("Tap to view nutrition info")
+                                                   .font(.caption)
+                                                   .foregroundColor(.secondary)
+                                           }
+                                           Spacer()
+                                           Image(systemName: "chevron.right")
+                                               .foregroundColor(.secondary)
+                                               .font(.caption.bold())
+                                       }
+                                       .padding(20)
+                                   }
+
+                                   Divider().padding(.leading, 20)
+
+                                   // Try again row
+                                   Button {
+                                       selectedImage = nil
+                                       prediction = ""
+                                       debugLines = []
+                                       showCamera = true
+                                   } label: {
+                                       HStack(spacing: 8) {
+                                           Image(systemName: "camera.rotate")
+                                               .foregroundColor(.orange)
+                                           Text("Try Again")
+                                               .font(.subheadline.bold())
+                                               .foregroundColor(.orange)
+                                       }
+                                       .frame(maxWidth: .infinity)
+                                       .padding(.vertical, 14)
+                                   }
+                               }
+                               .background(Color.white)
+                               .cornerRadius(16)
+                               .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
+                               .padding(.horizontal, 20)
+
+                               NavigationLink(
+                                   destination: FoodInformationView(name: prediction, usdaQuery: usdaQuery, dataType: usdaDataType),
+                                   isActive: $showFoodInfo
+                               ) { EmptyView() }
+                           }
+
+                           Spacer(minLength: 80)
+                       }
+                   }
+
+                   // water bottle
+                   VStack {
+                       Spacer()
+                       HStack {
+                           Button { showWaterLog = true } label: {
+                               WaterBottleButton(fillFraction: waterStore.log.fillFraction)
+                           }
+                           .padding([.leading, .bottom], 20)
+                           Spacer()
+                       }
+                   }
+               }
+               .sheet(isPresented: $showWaterLog) {
+                   NavigationStack { WaterLogView() }
+                       .environmentObject(waterStore)
+               }
+               .navigationBarHidden(true)
+           }
+       }
+   }
 #Preview {
     ContentView()
+        .environmentObject(WaterStore())
 }
